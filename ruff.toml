@@ -1,0 +1,9 @@
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C90"]
+
+# Set at what the codebase currently needs; the ratchet only goes down.
+[lint.mccabe]
+max-complexity = 13
