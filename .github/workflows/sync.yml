@@ -1,0 +1,45 @@
+name: Sync MyWhoosh to Garmin
+
+on:
+  schedule:
+    # Twice a day (UTC): ~13:00 and ~21:00 Paris time. Add or edit lines as you like.
+    - cron: "20 12 * * *"
+    - cron: "20 20 * * *"
+  workflow_dispatch: {}
+
+# Never run two syncs at once.
+concurrency:
+  group: mywhoosh-to-garmin-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run sync
+        env:
+          MYWHOOSH_EMAIL: ${{ secrets.MYWHOOSH_EMAIL }}
+          MYWHOOSH_PASSWORD: ${{ secrets.MYWHOOSH_PASSWORD }}
+          GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME }}
+          GARMIN_TOKEN_BASE64: ${{ secrets.GARMIN_TOKEN_BASE64 }}
+          LOG_LEVEL: INFO
+        run: python main.py
+
+      - name: Upload log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-log
+          path: mywhoosh_to_garmin.log
+          if-no-files-found: ignore
+          retention-days: 7
