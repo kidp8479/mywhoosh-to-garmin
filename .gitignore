@@ -3,6 +3,7 @@
 
 # Virtual environment
 venv/
+.venv/
 env/
 ENV/
 
@@ -11,6 +12,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
 
 # Distribution / packaging
 .Python
