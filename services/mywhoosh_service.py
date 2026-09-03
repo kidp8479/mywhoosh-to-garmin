@@ -1,13 +1,13 @@
 """MyWhoosh service for handling authentication and activity downloads."""
 
+import logging
 import os
+import tempfile
 import time
 import uuid
-import tempfile
+from typing import Any
+
 import requests
-import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime
 
 
 class MyWhooshService:
@@ -22,9 +22,9 @@ class MyWhooshService:
         """
         self.email = email
         self.password = password
-        self.access_token: Optional[str] = None
-        self.refresh_token: Optional[str] = None
-        self.whoosh_id: Optional[str] = None
+        self.access_token: str | None = None
+        self.refresh_token: str | None = None
+        self.whoosh_id: str | None = None
         self.device_id: str = str(uuid.uuid4())
         self.logger = logging.getLogger(__name__)
 
@@ -41,23 +41,21 @@ class MyWhooshService:
         self.logger.info("Authenticating with MyWhoosh...")
         self.logger.debug(f"MyWhoosh account: {self.email}")
 
-        payload = {
+        payload: dict[str, Any] = {
             "Username": self.email,
             "Password": self.password,
             "Platform": "Android",
             "Action": 1001,
             "CorrelationId": str(uuid.uuid4()),
             "DeviceId": self.device_id,
-            "Authorization": ""
+            "Authorization": "",
         }
 
         last_error = None
         for attempt in range(1, retries + 1):
             try:
                 response = requests.post(
-                    "https://services.mywhoosh.com/http-service/api/login",
-                    json=payload,
-                    timeout=30
+                    "https://services.mywhoosh.com/http-service/api/login", json=payload, timeout=30
                 )
                 response.raise_for_status()
 
@@ -91,7 +89,7 @@ class MyWhooshService:
         self.logger.error(f"Authentication failed after {retries} attempts: {last_error}")
         raise RuntimeError(f"Authentication failed: {last_error}")
 
-    def get_activities(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_activities(self, limit: int = 10) -> list[dict[str, Any]]:
         """Fetch activities from MyWhoosh.
 
         Args:
@@ -112,52 +110,52 @@ class MyWhooshService:
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "MyWhoosh-Python-Client/1.0"
+            "User-Agent": "MyWhoosh-Python-Client/1.0",
         }
 
         # Try different payload strategies
-        payloads_to_try = [
+        payloads_to_try: list[dict[str, Any]] = [
             {"page": 1, "limit": limit, "sortDate": "DESC"},  # Required sortDate parameter
             {"page": 1, "limit": limit, "sortDate": "ASC"},
         ]
 
         last_error = None
-        
+
         for i, payload in enumerate(payloads_to_try, 1):
             try:
                 self.logger.debug(f"Trying payload strategy {i}/{len(payloads_to_try)}: {payload}")
-                
+
                 response = requests.post(
                     "https://service14.mywhoosh.com/v2/rider/profile/activities",
                     headers=headers,
                     json=payload,
-                    timeout=30
+                    timeout=30,
                 )
 
                 if response.status_code == 200:
                     data = response.json()
                     self.logger.debug(f"Response structure: {list(data.keys())}")
-                    
+
                     # Extract activities from response - handle new API structure
                     if isinstance(data, list):
                         activities = data
                     elif isinstance(data, dict):
                         # New API returns {data: {results: [...]}}
-                        if 'data' in data and isinstance(data['data'], dict):
-                            activities = data['data'].get('results', [])
-                        elif 'data' in data and isinstance(data['data'], list):
-                            activities = data['data']
+                        if "data" in data and isinstance(data["data"], dict):
+                            activities = data["data"].get("results", [])
+                        elif "data" in data and isinstance(data["data"], list):
+                            activities = data["data"]
                         else:
                             activities = (
-                                data.get('activities') or 
-                                data.get('results') or
-                                data.get('rides') or
-                                data.get('rideHistory') or
-                                []
+                                data.get("activities")
+                                or data.get("results")
+                                or data.get("rides")
+                                or data.get("rideHistory")
+                                or []
                             )
                     else:
                         activities = []
-                    
+
                     self.logger.info(f"Found {len(activities)} activities")
                     return activities
 
@@ -187,7 +185,7 @@ class MyWhooshService:
         self.logger.error(error_msg)
         raise RuntimeError(error_msg)
 
-    def get_latest_activity(self) -> Optional[Dict[str, Any]]:
+    def get_latest_activity(self) -> dict[str, Any] | None:
         """Get the most recent activity.
 
         Returns:
@@ -197,25 +195,27 @@ class MyWhooshService:
             RuntimeError: If not authenticated or fetch fails
         """
         activities = self.get_activities(limit=1)
-        
+
         if not activities:
             self.logger.info("No activities found")
             return None
 
         latest = activities[0]
-        
+
         # Log activity details
-        activity_id = latest.get('id', latest.get('_id', 'unknown'))
-        activity_name = latest.get('name', latest.get('title', 'Unknown Activity'))
-        activity_date = latest.get('date', latest.get('startTime', latest.get('createdAt', 'unknown')))
-        
+        activity_id = latest.get("id", latest.get("_id", "unknown"))
+        activity_name = latest.get("name", latest.get("title", "Unknown Activity"))
+        activity_date = latest.get(
+            "date", latest.get("startTime", latest.get("createdAt", "unknown"))
+        )
+
         self.logger.info(f"Latest activity: {activity_name}")
         self.logger.info(f"Activity ID: {activity_id}")
         self.logger.info(f"Activity date: {activity_date}")
-        
+
         return latest
 
-    def download_activity(self, activity: Dict[str, Any]) -> str:
+    def download_activity(self, activity: dict[str, Any]) -> str:
         """Download activity FIT file.
 
         Args:
@@ -227,45 +227,42 @@ class MyWhooshService:
         Raises:
             RuntimeError: If download fails
         """
-        activity_id = activity.get('id', activity.get('_id', 'unknown'))
-        activity_file_id = activity.get('activityFileId')
+        activity_id = activity.get("id", activity.get("_id", "unknown"))
+        activity_file_id = activity.get("activityFileId")
         self.logger.info(f"Downloading activity {activity_id}...")
 
         if not self.access_token or not self.whoosh_id:
             raise RuntimeError("Must authenticate before downloading activities")
-        
+
         if not activity_file_id:
             raise ValueError(f"Activity {activity_id} has no activityFileId")
-        
+
         # Get presigned S3 URL from the download-activity-file API endpoint
         headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
         }
-        
-        payload = {
-            "key": self.whoosh_id,
-            "fileId": activity_file_id
-        }
-        
+
+        payload = {"key": self.whoosh_id, "fileId": activity_file_id}
+
         try:
             response = requests.post(
                 "https://service14.mywhoosh.com/v2/rider/profile/download-activity-file",
                 json=payload,
                 headers=headers,
-                timeout=30
+                timeout=30,
             )
             response.raise_for_status()
-            
+
             data = response.json()
-            
-            if data.get('error'):
+
+            if data.get("error"):
                 raise RuntimeError(f"API error: {data.get('message')}")
-            
-            download_url = data.get('data')
-            if not isinstance(download_url, str) or not download_url.startswith('http'):
+
+            download_url = data.get("data")
+            if not isinstance(download_url, str) or not download_url.startswith("http"):
                 raise RuntimeError(f"Invalid download URL in response: {data}")
-                
+
         except requests.RequestException as e:
             raise RuntimeError(f"Failed to get download URL: {e}") from e
 
@@ -282,19 +279,18 @@ class MyWhooshService:
             temp_dir = tempfile.gettempdir()
             file_path = os.path.join(temp_dir, f"mywhoosh_{activity_id}_{timestamp}.fit")
 
-            with open(file_path, 'wb') as f:
+            with open(file_path, "wb") as f:
                 f.write(response.content)
 
             self.logger.info(f"Saved to: {file_path}")
 
-
             # Verify it's a valid FIT file
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 header = f.read(14)  # FIT header is 14 bytes
-                
+
                 # Check for FIT magic bytes at offset 8-11
                 if len(header) >= 12:
-                    if header[8:12] == b'.FIT':
+                    if header[8:12] == b".FIT":
                         self.logger.info("✓ Valid FIT file header detected")
                     else:
                         self.logger.warning(
