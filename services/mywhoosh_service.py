@@ -28,13 +28,18 @@ class MyWhooshService:
         self.device_id: str = str(uuid.uuid4())
         self.logger = logging.getLogger(__name__)
 
-    def authenticate(self) -> None:
+    def authenticate(self, retries: int = 3, backoff: int = 5) -> None:
         """Authenticate with MyWhoosh.
 
+        The login endpoint is occasionally flaky and rejects a valid password
+        with "Email address or password is incorrect", so retry a few times
+        before giving up (important for the unattended GitHub Actions run).
+
         Raises:
-            RuntimeError: If authentication fails
+            RuntimeError: If authentication fails after all retries
         """
-        self.logger.info(f"Authenticating with MyWhoosh as {self.email}...")
+        self.logger.info("Authenticating with MyWhoosh...")
+        self.logger.debug(f"MyWhoosh account: {self.email}")
 
         payload = {
             "Username": self.email,
@@ -46,37 +51,45 @@ class MyWhooshService:
             "Authorization": ""
         }
 
-        try:
-            response = requests.post(
-                "https://services.mywhoosh.com/http-service/api/login",
-                json=payload,
-                timeout=30
-            )
-            response.raise_for_status()
+        last_error = None
+        for attempt in range(1, retries + 1):
+            try:
+                response = requests.post(
+                    "https://services.mywhoosh.com/http-service/api/login",
+                    json=payload,
+                    timeout=30
+                )
+                response.raise_for_status()
 
-            data = response.json()
+                data = response.json()
 
-            if data.get("Success"):
-                self.access_token = data.get("AccessToken")
-                self.whoosh_id = data.get("WhooshId")
-                self.refresh_token = data.get("RefreshToken")
-                
-                self.logger.info(f"Successfully authenticated with MyWhoosh")
-                self.logger.info(f"WhooshId: {self.whoosh_id}")
-                if self.access_token:
-                    self.logger.debug(f"Access token: {self.access_token[:50]}...")
+                if data.get("Success"):
+                    self.access_token = data.get("AccessToken")
+                    self.whoosh_id = data.get("WhooshId")
+                    self.refresh_token = data.get("RefreshToken")
 
-            else:
-                message = data.get("Message", "Unknown error")
-                self.logger.error(f"Authentication failed: {message}")
-                raise RuntimeError(f"Authentication failed: {message}")
+                    self.logger.info("Successfully authenticated with MyWhoosh")
+                    self.logger.info(f"WhooshId: {self.whoosh_id}")
+                    if self.access_token:
+                        self.logger.debug(f"Access token: {self.access_token[:50]}...")
+                    return
 
-        except requests.RequestException as e:
-            self.logger.exception(f"Network error during authentication: {e}")
-            raise RuntimeError(f"Network error during authentication: {e}") from e
-        except Exception as e:
-            self.logger.exception(f"Failed to authenticate with MyWhoosh: {e}")
-            raise RuntimeError(f"Authentication failed: {e}") from e
+                last_error = data.get("Message", "Unknown error")
+
+            except requests.RequestException as e:
+                last_error = f"Network error: {e}"
+            except Exception as e:
+                last_error = str(e)
+
+            if attempt < retries:
+                self.logger.warning(
+                    f"MyWhoosh auth attempt {attempt}/{retries} failed "
+                    f"({last_error}); retrying in {backoff}s..."
+                )
+                time.sleep(backoff)
+
+        self.logger.error(f"Authentication failed after {retries} attempts: {last_error}")
+        raise RuntimeError(f"Authentication failed: {last_error}")
 
     def get_activities(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Fetch activities from MyWhoosh.

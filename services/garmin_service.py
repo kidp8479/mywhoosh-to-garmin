@@ -15,15 +15,24 @@ from garth.exc import GarthHTTPError
 class GarminService:
     """Service for interacting with Garmin Connect."""
 
-    def __init__(self, username: str, password: str):
+    def __init__(self, username: str, password: str, token_base64: Optional[str] = None):
         """Initialize GarminService with credentials.
 
         Args:
             username: Garmin Connect username
             password: Garmin Connect password
+            token_base64: Optional base64 garth token store. When set, login uses
+                the saved tokens (works with MFA accounts and headless/CI) instead
+                of username/password.
         """
         self.username = username
         self.password = password
+        # Tolerate a token that lost its trailing "=" padding in a copy-paste
+        # or when stored as a CI secret.
+        if token_base64:
+            token_base64 = token_base64.strip()
+            token_base64 += "=" * (-len(token_base64) % 4)
+        self.token_base64 = token_base64
         self.client: Garmin = Garmin(username, password)
         self.logger = logging.getLogger(__name__)
         self._authenticated = False
@@ -40,7 +49,11 @@ class GarminService:
         self.logger.info("Logging in to Garmin Connect...")
 
         try:
-            self.client.login()
+            if self.token_base64:
+                self.logger.info("Using saved Garmin token store (GARMIN_TOKEN_BASE64)")
+                self.client.login(self.token_base64)
+            else:
+                self.client.login()
             self._authenticated = True
             self.logger.info("Successfully authenticated with Garmin Connect")
         except GarminConnectAuthenticationError:
@@ -142,23 +155,32 @@ class GarminService:
             # Check each activity
             for activity in activities:
                 try:
-                    # Parse activity start time
-                    start_time_str = activity.get('startTimeLocal', activity.get('startTime'))
-                    if not start_time_str:
-                        continue
+                    # Compare on the underlying UTC instant. beginTimestamp is
+                    # epoch milliseconds (UTC) and is timezone-proof; the string
+                    # fields are a fallback. activity_date is naive local, so
+                    # .timestamp() gives its epoch in the same frame.
+                    begin_ms = activity.get('beginTimestamp')
+                    if begin_ms is not None:
+                        activity_start = datetime.fromtimestamp(begin_ms / 1000)
+                    else:
+                        start_time_str = activity.get('startTimeLocal', activity.get('startTime'))
+                        if not start_time_str:
+                            continue
+                        activity_start = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
 
-                    # Handle different time formats
-                    start_time_str = start_time_str.replace('Z', '+00:00')
-                    activity_start = datetime.fromisoformat(start_time_str)
-
-                    # Calculate time difference in hours
-                    time_diff = abs((activity_start - activity_date).total_seconds() / 3600)
+                    time_diff = abs(activity_start.timestamp() - activity_date.timestamp()) / 3600
 
                     if time_diff <= threshold_hours:
                         self.logger.info(
                             f"Found potential duplicate: '{activity.get('activityName')}' "
-                            f"at {activity_start} (Δ{time_diff:.1f}h)"
+                            f"at {activity_start} (Δ{time_diff:.2f}h)"
                         )
+
+                        # A near-exact start time is the same ride, even though
+                        # Garmin renames indoor rides to the route/world name.
+                        if time_diff <= 0.1:  # ~6 minutes
+                            self.logger.info("✓ Start time matches - confirmed duplicate")
+                            return True
 
                         # Additional name matching if provided
                         if activity_name:

@@ -75,19 +75,23 @@ def load_config() -> dict:
         'mywhoosh_password': os.getenv('MYWHOOSH_PASSWORD'),
         'garmin_username': os.getenv('GARMIN_USERNAME'),
         'garmin_password': os.getenv('GARMIN_PASSWORD'),
+        'garmin_token_base64': os.getenv('GARMIN_TOKEN_BASE64'),
         'log_level': os.getenv('LOG_LEVEL', 'INFO'),
     }
-    
+
     # Validate required configuration
     required_keys = [
         'mywhoosh_email',
         'mywhoosh_password',
         'garmin_username',
-        'garmin_password'
     ]
-    
+
     missing = [k for k in required_keys if not config[k]]
-    
+
+    # Garmin needs either a password or a saved token store
+    if not config['garmin_password'] and not config['garmin_token_base64']:
+        missing.append('garmin_password')  # (or GARMIN_TOKEN_BASE64)
+
     if missing:
         missing_vars = [k.upper() for k in missing]
         raise ValueError(
@@ -148,7 +152,8 @@ def main() -> int:
         
         garmin_service = GarminService(
             config['garmin_username'],
-            config['garmin_password']
+            config['garmin_password'],
+            token_base64=config['garmin_token_base64']
         )
         
         logger.info("Services initialized")
