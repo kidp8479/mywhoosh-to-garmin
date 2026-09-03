@@ -1,20 +1,22 @@
 """Activity processor for orchestrating the MyWhoosh to Garmin workflow."""
 
 import logging
-from typing import Optional
 from datetime import datetime
-from services.mywhoosh_service import MyWhooshService
+
 from services.fit_file_service import FitFileService
 from services.garmin_service import GarminService
+from services.mywhoosh_service import MyWhooshService
 
 
 class ActivityProcessor:
     """Main orchestrator for processing activities from MyWhoosh to Garmin."""
 
-    def __init__(self,
-                 mywhoosh_service: MyWhooshService,
-                 fit_file_service: FitFileService,
-                 garmin_service: GarminService):
+    def __init__(
+        self,
+        mywhoosh_service: MyWhooshService,
+        fit_file_service: FitFileService,
+        garmin_service: GarminService,
+    ):
         """Initialize ActivityProcessor with injected services.
 
         Args:
@@ -36,8 +38,8 @@ class ActivityProcessor:
         Returns:
             True if successful, False otherwise
         """
-        original_file_path: Optional[str] = None
-        modified_file_path: Optional[str] = None
+        original_file_path: str | None = None
+        modified_file_path: str | None = None
 
         try:
             # Header
@@ -58,13 +60,15 @@ class ActivityProcessor:
                 return False
 
             # Extract activity metadata for logging and duplicate checking
-            activity_id = latest_activity.get('id', latest_activity.get('_id', 'unknown'))
-            activity_name = latest_activity.get('name', latest_activity.get('title', 'Unknown Activity'))
+            activity_id = latest_activity.get("id", latest_activity.get("_id", "unknown"))
+            activity_name = latest_activity.get(
+                "name", latest_activity.get("title", "Unknown Activity")
+            )
             activity_date_str = (
-                latest_activity.get('date') or 
-                latest_activity.get('startTime') or 
-                latest_activity.get('createdAt') or 
-                latest_activity.get('timestamp')
+                latest_activity.get("date")
+                or latest_activity.get("startTime")
+                or latest_activity.get("createdAt")
+                or latest_activity.get("timestamp")
             )
 
             self.logger.info(f"Activity: {activity_name}")
@@ -74,7 +78,7 @@ class ActivityProcessor:
             # Step 3: Check for duplicates (if enabled)
             if check_duplicates:
                 self.logger.info("Step 3: Checking for duplicates on Garmin Connect...")
-                
+
                 # Authenticate with Garmin early for duplicate check
                 if not self.garmin_service.is_authenticated():
                     self.garmin_service.authenticate()
@@ -84,8 +88,7 @@ class ActivityProcessor:
 
                 if activity_date:
                     is_duplicate = self.garmin_service.check_duplicate_activity(
-                        activity_date,
-                        activity_name
+                        activity_date, activity_name
                     )
 
                     if is_duplicate:
@@ -147,7 +150,7 @@ class ActivityProcessor:
                 self.fit_file_service.cleanup_file(modified_file_path)
             self.logger.info("Cleanup complete")
 
-    def _parse_activity_date(self, date_str: Optional[str]) -> Optional[datetime]:
+    def _parse_activity_date(self, date_str: str | None) -> datetime | None:
         """Parse activity date from various possible formats.
 
         Args:
@@ -172,22 +175,22 @@ class ActivityProcessor:
 
         # Try different date formats
         date_formats = [
-            '%Y-%m-%dT%H:%M:%S.%fZ',      # ISO with milliseconds and Z
-            '%Y-%m-%dT%H:%M:%SZ',          # ISO with Z
-            '%Y-%m-%dT%H:%M:%S',           # ISO without Z
-            '%Y-%m-%d %H:%M:%S',           # Space separated
-            '%Y-%m-%d',                     # Date only
+            "%Y-%m-%dT%H:%M:%S.%fZ",  # ISO with milliseconds and Z
+            "%Y-%m-%dT%H:%M:%SZ",  # ISO with Z
+            "%Y-%m-%dT%H:%M:%S",  # ISO without Z
+            "%Y-%m-%d %H:%M:%S",  # Space separated
+            "%Y-%m-%d",  # Date only
         ]
 
         for fmt in date_formats:
             try:
-                return datetime.strptime(date_str.replace('+00:00', ''), fmt)
+                return datetime.strptime(date_str.replace("+00:00", ""), fmt)
             except (ValueError, AttributeError):
                 continue
 
         # Try isoformat parsing
         try:
-            date_str_clean = date_str.replace('Z', '+00:00')
+            date_str_clean = date_str.replace("Z", "+00:00")
             return datetime.fromisoformat(date_str_clean)
         except (ValueError, AttributeError):
             pass
@@ -209,12 +212,7 @@ class ActivityProcessor:
                 - 'skipped': Skipped activities (duplicates or errors)
                 - 'errors': Activities that failed to sync
         """
-        stats = {
-            'total': 0,
-            'synced': 0,
-            'skipped': 0,
-            'errors': 0
-        }
+        stats = {"total": 0, "synced": 0, "skipped": 0, "errors": 0}
 
         try:
             # Header
@@ -244,16 +242,16 @@ class ActivityProcessor:
             for i, activity in enumerate(activities, 1):
                 try:
                     self.logger.info(f"\n--- Processing activity {i}/{len(activities)} ---")
-                    stats['total'] += 1
+                    stats["total"] += 1
 
                     # Extract activity metadata
-                    activity_id = activity.get('id', activity.get('_id', 'unknown'))
-                    activity_name = activity.get('name', activity.get('title', 'Unknown Activity'))
+                    activity_id = activity.get("id", activity.get("_id", "unknown"))
+                    activity_name = activity.get("name", activity.get("title", "Unknown Activity"))
                     activity_date_str = (
-                        activity.get('date') or
-                        activity.get('startTime') or
-                        activity.get('createdAt') or
-                        activity.get('timestamp')
+                        activity.get("date")
+                        or activity.get("startTime")
+                        or activity.get("createdAt")
+                        or activity.get("timestamp")
                     )
 
                     self.logger.info(f"Activity: {activity_name} (ID: {activity_id})")
@@ -263,12 +261,11 @@ class ActivityProcessor:
                         activity_date = self._parse_activity_date(activity_date_str)
                         if activity_date:
                             is_duplicate = self.garmin_service.check_duplicate_activity(
-                                activity_date,
-                                activity_name
+                                activity_date, activity_name
                             )
                             if is_duplicate:
                                 self.logger.warning("⚠ Duplicate activity - skipping")
-                                stats['skipped'] += 1
+                                stats["skipped"] += 1
                                 continue
 
                     # Download and sync activity
@@ -281,7 +278,9 @@ class ActivityProcessor:
                         self.logger.info("Downloaded FIT file")
 
                         # Modify
-                        modified_file_path = self.fit_file_service.modify_device_info(original_file_path)
+                        modified_file_path = self.fit_file_service.modify_device_info(
+                            original_file_path
+                        )
                         self.logger.info("Modified FIT file")
 
                         # Upload
@@ -290,11 +289,11 @@ class ActivityProcessor:
 
                         self.garmin_service.upload_activity(modified_file_path)
                         self.logger.info("✓ Activity synced successfully")
-                        stats['synced'] += 1
+                        stats["synced"] += 1
 
                     except Exception as e:
                         self.logger.exception(f"✗ Failed to sync activity: {e}")
-                        stats['errors'] += 1
+                        stats["errors"] += 1
 
                     finally:
                         # Cleanup temp files
@@ -305,7 +304,7 @@ class ActivityProcessor:
 
                 except Exception as e:
                     self.logger.exception(f"Error processing activity: {e}")
-                    stats['errors'] += 1
+                    stats["errors"] += 1
                     continue
 
             # Summary
@@ -326,4 +325,3 @@ class ActivityProcessor:
             self.logger.error("=" * 70)
             self.logger.exception(f"Error: {e}")
             return stats
-

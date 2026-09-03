@@ -1,21 +1,21 @@
 """Garmin service for handling authentication and activity uploads."""
 
 import logging
-from typing import Dict, Any, Optional, Union
 from datetime import datetime
+from typing import Any
+
 from garminconnect import (
     Garmin,
     GarminConnectAuthenticationError,
+    GarminConnectConnectionError,
     GarminConnectTooManyRequestsError,
-    GarminConnectConnectionError
 )
-from garth.exc import GarthHTTPError
 
 
 class GarminService:
     """Service for interacting with Garmin Connect."""
 
-    def __init__(self, username: str, password: str, token_base64: Optional[str] = None):
+    def __init__(self, username: str, password: str, token_base64: str | None = None):
         """Initialize GarminService with credentials.
 
         Args:
@@ -93,13 +93,13 @@ class GarminService:
             return response
         except Exception as e:
             error_str = str(e)
-            
+
             # Handle 409 Conflict gracefully (activity already exists)
             if "409" in error_str or "Conflict" in error_str:
                 self.logger.info("⚠ Activity already exists on Garmin Connect (409 Conflict)")
                 self.logger.info("Treating as success - no duplicate upload needed")
                 return {"status": "skipped", "message": "Activity already exists on Garmin Connect"}
-            
+
             self.logger.exception(f"Failed to upload activity: {e}")
             raise RuntimeError(f"Upload failed: {e}") from e
 
@@ -112,10 +112,7 @@ class GarminService:
         return self._authenticated
 
     def check_duplicate_activity(
-        self,
-        activity_date: datetime,
-        activity_name: Optional[str] = None,
-        threshold_hours: int = 2
+        self, activity_date: datetime, activity_name: str | None = None, threshold_hours: int = 2
     ) -> bool:
         """Check if an activity already exists on Garmin Connect.
 
@@ -137,13 +134,12 @@ class GarminService:
             raise RuntimeError("Must authenticate before checking activities")
 
         self.logger.info(
-            f"Checking for duplicate activity around {activity_date} "
-            f"(±{threshold_hours}h window)"
+            f"Checking for duplicate activity around {activity_date} (±{threshold_hours}h window)"
         )
 
         try:
             # Get activities for the date
-            date_str = activity_date.strftime('%Y-%m-%d')
+            date_str = activity_date.strftime("%Y-%m-%d")
             activities = self.client.get_activities_by_date(date_str, date_str)
 
             if not activities:
@@ -159,14 +155,16 @@ class GarminService:
                     # epoch milliseconds (UTC) and is timezone-proof; the string
                     # fields are a fallback. activity_date is naive local, so
                     # .timestamp() gives its epoch in the same frame.
-                    begin_ms = activity.get('beginTimestamp')
+                    begin_ms = activity.get("beginTimestamp")
                     if begin_ms is not None:
                         activity_start = datetime.fromtimestamp(begin_ms / 1000)
                     else:
-                        start_time_str = activity.get('startTimeLocal', activity.get('startTime'))
+                        start_time_str = activity.get("startTimeLocal", activity.get("startTime"))
                         if not start_time_str:
                             continue
-                        activity_start = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                        activity_start = datetime.fromisoformat(
+                            start_time_str.replace("Z", "+00:00")
+                        )
 
                     time_diff = abs(activity_start.timestamp() - activity_date.timestamp()) / 3600
 
@@ -184,8 +182,11 @@ class GarminService:
 
                         # Additional name matching if provided
                         if activity_name:
-                            garmin_name = activity.get('activityName', '').lower()
-                            if activity_name.lower() in garmin_name or garmin_name in activity_name.lower():
+                            garmin_name = activity.get("activityName", "").lower()
+                            if (
+                                activity_name.lower() in garmin_name
+                                or garmin_name in activity_name.lower()
+                            ):
                                 self.logger.info("✓ Activity name matches - confirmed duplicate")
                                 return True
                             else:

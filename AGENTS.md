@@ -36,10 +36,10 @@ Each service:
 ### Activity Dictionary (from MyWhoosh API)
 ```python
 activity = {
-    'id': '69622c3121123aaced178584',           # Used for download requests
-    'name': 'Morning Ride',                      # Activity name
-    'date' or 'timestamp': 1768039347,           # Unix timestamp (seconds)
-    'activityFileId': 'file123'                  # Used in download endpoint
+    "id": "69622c3121123aaced178584",  # Used for download requests
+    "name": "Morning Ride",  # Activity name
+    "date" or "timestamp": 1768039347,  # Unix timestamp (seconds)
+    "activityFileId": "file123",  # Used in download endpoint
 }
 ```
 
