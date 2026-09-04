@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# Local agent notes, not published with the fork (see CONTRIBUTING.md)
+CLAUDE.md
+
 # Virtual environment
 venv/
 .venv/
