@@ -1,6 +1,8 @@
 """Garmin service for handling authentication and activity uploads."""
 
 import logging
+import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -11,11 +13,26 @@ from garminconnect import (
     GarminConnectTooManyRequestsError,
 )
 
+# Garmin's OAuth token-exchange endpoint throttles hard (429) when hit more than
+# a couple of times in quick succession - easy to trigger with a couple of
+# manual re-runs. A short, bounded retry recovers from that without masking a
+# rate limit that is genuinely still active after it.
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_BACKOFF_SECONDS = 30
+
 
 class GarminService:
     """Service for interacting with Garmin Connect."""
 
-    def __init__(self, username: str, password: str, token_base64: str | None = None):
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        token_base64: str | None = None,
+        rate_limit_retries: int = RATE_LIMIT_RETRIES,
+        rate_limit_backoff_seconds: float = RATE_LIMIT_BACKOFF_SECONDS,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
         """Initialize GarminService with credentials.
 
         Args:
@@ -24,6 +41,10 @@ class GarminService:
             token_base64: Optional base64 garth token store. When set, login uses
                 the saved tokens (works with MFA accounts and headless/CI) instead
                 of username/password.
+            rate_limit_retries: Login attempts before giving up on a 429.
+            rate_limit_backoff_seconds: Base backoff, multiplied by the attempt
+                number (30s, 60s, ... for the default retries).
+            sleep: Injectable for tests; defaults to time.sleep.
         """
         self.username = username
         self.password = password
@@ -36,38 +57,55 @@ class GarminService:
         self.client: Garmin = Garmin(username, password)
         self.logger = logging.getLogger(__name__)
         self._authenticated = False
+        self._rate_limit_retries = rate_limit_retries
+        self._rate_limit_backoff_seconds = rate_limit_backoff_seconds
+        self._sleep = sleep
 
     def authenticate(self) -> None:
-        """Authenticate with Garmin Connect.
+        """Authenticate with Garmin Connect, retrying a rate limit a few times.
 
         Raises:
             GarminConnectAuthenticationError: Invalid credentials
-            GarminConnectTooManyRequestsError: Rate limit exceeded
+            GarminConnectTooManyRequestsError: Rate limit exceeded, retries exhausted
             GarminConnectConnectionError: Network connection issues
             RuntimeError: Other authentication failures
         """
         self.logger.info("Logging in to Garmin Connect...")
 
-        try:
-            if self.token_base64:
-                self.logger.info("Using saved Garmin token store (GARMIN_TOKEN_BASE64)")
-                self.client.login(self.token_base64)
-            else:
-                self.client.login()
-            self._authenticated = True
-            self.logger.info("Successfully authenticated with Garmin Connect")
-        except GarminConnectAuthenticationError:
-            self.logger.exception("Authentication error. Check your credentials.")
-            raise
-        except GarminConnectTooManyRequestsError:
-            self.logger.exception("Too many requests. Try again later.")
-            raise
-        except GarminConnectConnectionError:
-            self.logger.exception("Connection error. Check your internet connection.")
-            raise
-        except Exception as e:
-            self.logger.exception(f"Failed to login to Garmin Connect: {e}")
-            raise RuntimeError(f"Authentication failed: {e}") from e
+        for attempt in range(1, self._rate_limit_retries + 1):
+            try:
+                self._login()
+                self._authenticated = True
+                self.logger.info("Successfully authenticated with Garmin Connect")
+                return
+            except GarminConnectAuthenticationError:
+                self.logger.exception("Authentication error. Check your credentials.")
+                raise
+            except GarminConnectTooManyRequestsError:
+                if attempt == self._rate_limit_retries:
+                    self.logger.exception(
+                        f"Too many requests, out of retries ({self._rate_limit_retries})."
+                    )
+                    raise
+                backoff = self._rate_limit_backoff_seconds * attempt
+                self.logger.warning(
+                    f"Rate limited by Garmin (attempt {attempt}/{self._rate_limit_retries}), "
+                    f"retrying in {backoff:.0f}s..."
+                )
+                self._sleep(backoff)
+            except GarminConnectConnectionError:
+                self.logger.exception("Connection error. Check your internet connection.")
+                raise
+            except Exception as e:
+                self.logger.exception(f"Failed to login to Garmin Connect: {e}")
+                raise RuntimeError(f"Authentication failed: {e}") from e
+
+    def _login(self) -> None:
+        if self.token_base64:
+            self.logger.info("Using saved Garmin token store (GARMIN_TOKEN_BASE64)")
+            self.client.login(self.token_base64)
+        else:
+            self.client.login()
 
     def upload_activity(self, fit_file_path: str) -> Any:
         """Upload a .fit file to Garmin Connect.
