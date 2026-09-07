@@ -90,7 +90,7 @@ def load_config() -> dict:
 
     # Garmin needs either a password or a saved token store
     if not config["garmin_password"] and not config["garmin_token_base64"]:
-        missing.append("garmin_password")  # (or GARMIN_TOKEN_BASE64)
+        missing.append("garmin_password or garmin_token_base64")
 
     if missing:
         missing_vars = [k.upper() for k in missing]
