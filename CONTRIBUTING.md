@@ -43,10 +43,9 @@ Don't bypass it.
 
 ## Secrets
 
-- Local runs: `.env` only (git-ignored), `.env.example` kept current.
-- Scheduled runs: GitHub Actions secrets
-  (`MYWHOOSH_EMAIL`/`MYWHOOSH_PASSWORD`/`GARMIN_USERNAME`/`GARMIN_TOKEN_BASE64`),
-  never a value in the workflow file itself. This repo is public - never
-  commit a real credential or token, even in a throwaway commit.
+- All runs read `.env` only (git-ignored); keep `.env.example` current.
+- The `sync.yml` workflow is disabled (Garmin 429s GitHub Actions IPs); its
+  secrets, if still set, are dormant. This repo is public - never commit a
+  real credential or token, even in a throwaway commit.
 - Treat a leaked secret as compromised: rotate it, don't just delete the
   line.

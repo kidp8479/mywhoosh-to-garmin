@@ -1,84 +1,76 @@
 # MyWhoosh to Garmin Connect
 
-MyWhoosh has no integration with Garmin Connect. If you ride indoors on MyWhoosh
-but keep your training history on Garmin, every ride means exporting a FIT file
-by hand and uploading it somewhere else.
+A command-line tool that copies your latest MyWhoosh indoor ride into Garmin
+Connect, with the ride attributed to a Garmin Edge 840 so it counts towards your
+training load like any other bike computer.
 
-This is a fork of [marcelorodrigo/mywhoosh-to-garmin](https://github.com/marcelorodrigo/mywhoosh-to-garmin)
-adapted to run on its own, on a schedule, with no machine to keep switched on.
-Twice a day a GitHub Actions job checks MyWhoosh for a new activity. If it finds
-one it has not seen before, it rewrites the FIT file so Garmin records it as
-coming from an Edge 840, then uploads it to Garmin Connect. If there is nothing
-new, or the ride is already on Garmin, it does nothing.
+MyWhoosh has no Garmin integration. Without this, every indoor ride means
+exporting a FIT file by hand and uploading it somewhere else. Here you run one
+command after a ride and it is done.
 
-## Credit
+This is a personal fork of
+[marcelorodrigo/mywhoosh-to-garmin](https://github.com/marcelorodrigo/mywhoosh-to-garmin).
+See [Differences from upstream](#differences-from-upstream).
 
-All the hard parts (talking to the MyWhoosh API, parsing and rebuilding FIT
-files, the duplicate check) are the work of Marcelo Rodrigo in the
-[upstream project](https://github.com/marcelorodrigo/mywhoosh-to-garmin),
-released under GPL-3.0.
-
-## What this fork changes
-
-* Runs on GitHub Actions instead of a local cron job. The workflow lives at
-  `.github/workflows/sync.yml`, runs twice a day, and can also be started by hand
-  from the Actions tab.
-* Logs in to Garmin with a saved token instead of a password. Password login
-  breaks as soon as the account hits MFA or a captcha, which does not work for
-  an unattended job. `generate_garmin_token.py` logs in once on your own
-  machine and prints a token blob you store as a secret. It lasts about a year.
-* Config comes from environment variables and Actions secrets, and the run log
-  is uploaded as an artifact when a job fails.
-
-## Running it on GitHub Actions
-
-1. This fork is public, so do not put real values anywhere in the code. All
-   credentials go into Actions secrets.
-2. Generate a Garmin token once, on your own machine:
-
-   ```bash
-   python3 -m venv venv && source venv/bin/activate
-   pip install -r requirements.txt
-   python generate_garmin_token.py
-   ```
-
-   It asks for your Garmin email, password, and MFA code if you use one, then
-   prints a base64 blob.
-
-3. In the repo, open Settings > Secrets and variables > Actions and add:
-
-   | Secret | Value |
-   |--------|-------|
-   | `MYWHOOSH_EMAIL` | your MyWhoosh email |
-   | `MYWHOOSH_PASSWORD` | your MyWhoosh password |
-   | `GARMIN_USERNAME` | your Garmin email |
-   | `GARMIN_TOKEN_BASE64` | the blob from step 2 |
-
-4. Open the Actions tab, enable workflows, and run "Sync MyWhoosh to Garmin"
-   once by hand to check it works.
-
-When the job starts failing on Garmin auth, the token has expired. Re-run
-`generate_garmin_token.py` and update the secret. To change how often it runs,
-edit the `cron:` line in the workflow.
-
-## Running it locally
+## Setup
 
 ```bash
-python3 -m venv venv && source venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # then fill it in
-python main.py
+cp .env.example .env
 ```
 
-For local use you can put a plain `GARMIN_PASSWORD` in `.env` instead of a
-token, as long as your Garmin account is not behind MFA. See `.env.example`
-for the options.
-
-A crontab line works too:
+Edit `.env`:
 
 ```bash
-0 * * * * cd /path/to/mywhoosh-to-garmin && ./venv/bin/python main.py >> sync.log 2>&1
+MYWHOOSH_EMAIL=you@example.com
+MYWHOOSH_PASSWORD=...
+GARMIN_USERNAME=you@example.com     # your Garmin email
+GARMIN_PASSWORD=...
 ```
+
+If your Garmin account uses MFA, a password login will not work. Instead run
+`python generate_garmin_token.py` once, and put the base64 blob it prints into
+`GARMIN_TOKEN_BASE64` in `.env` (leave `GARMIN_PASSWORD` unset). The token lasts
+about a year.
+
+## Usage
+
+After a ride:
+
+```bash
+./sync.sh              # sync the latest activity
+./sync.sh --batch 5    # or catch up the last 5 activities
+```
+
+`sync.sh` is a thin wrapper around `.venv/bin/python main.py`. Duplicate
+detection means re-running it is always safe — a ride already on Garmin is
+skipped.
+
+## Automating it
+
+There is a GitHub Actions workflow at `.github/workflows/sync.yml`, **kept for
+reference but disabled**. Garmin rejects logins from GitHub Actions IP ranges
+with a hard `429 Too Many Requests`, so scheduled runs there fail every time.
+The same is true of most cloud/shared IPs.
+
+If you have a machine at home that is always on, a cron job works:
+
+```cron
+30 21 * * *  cd /path/to/mywhoosh-to-garmin && ./sync.sh >> cron.log 2>&1
+```
+
+Otherwise, running it by hand after each ride is the intended workflow.
+
+## Differences from upstream
+
+* `GARMIN_TOKEN_BASE64` as an alternative to a password, for MFA accounts and
+  any non-interactive use.
+* A bounded retry with backoff when Garmin returns `429` on login.
+* ruff + mypy + a CI workflow (`ci.yml`) running format, lint, typecheck and
+  tests on every push and PR; more coverage on `garmin_service`.
+* Dead Zwift code removed; GPL-3.0 `LICENSE` file added.
+* `sync.sh` wrapper.
 
 ## How a run goes
 
@@ -101,18 +93,25 @@ is an Edge 530.
 
 ## When it does not work
 
-* Garmin auth fails on Actions: the token expired, regenerate it.
-* MyWhoosh auth fails: check the credentials, and open the MyWhoosh app to
-  confirm the account and that the ride actually synced.
-* "Duplicate detected": not an error, the ride is already on Garmin.
-* Upload fails: check [status.garmin.com](https://status.garmin.com), read
+* **Garmin auth fails with `429`**: you are rate limited on the OAuth
+  token-exchange endpoint. Wait (minutes to hours) and avoid rapid re-runs.
+  From a home IP this is rare; from a shared or cloud IP it is close to
+  permanent.
+* **Garmin auth fails on credentials**: check `GARMIN_USERNAME` /
+  `GARMIN_PASSWORD`, and whether the account now needs MFA — if so, switch to
+  `GARMIN_TOKEN_BASE64`.
+* **MyWhoosh auth fails**: check the credentials, and open the MyWhoosh app to
+  confirm the ride actually synced.
+* **"Duplicate detected"**: not an error, the ride is already on Garmin.
+* **Upload fails**: check [status.garmin.com](https://status.garmin.com), read
   `mywhoosh_to_garmin.log`, try again in a few minutes.
-* Cannot find a download URL: the MyWhoosh activity format may have changed.
+* **Cannot find a download URL**: the MyWhoosh activity format may have changed.
   The log shows the keys it saw.
 
 ## Limitations
 
-* One activity at a time, the latest one. No bulk backfill.
+* One activity at a time by default, the latest. `--batch N` covers the last N.
+  No full backfill.
 * Duplicate detection is a 2 hour time window, not a content hash.
 * MyWhoosh download URLs are short lived.
 

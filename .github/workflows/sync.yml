@@ -1,3 +1,7 @@
+# DISABLED. Garmin rejects logins from GitHub Actions IP ranges with a hard
+# 429 on the OAuth token-exchange endpoint, so every scheduled run fails.
+# Kept for reference. Run the sync from a home IP instead (see README).
+
 name: Sync MyWhoosh to Garmin
 
 on:
