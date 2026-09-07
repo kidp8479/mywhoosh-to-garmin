@@ -32,8 +32,8 @@ mypy .
 pytest -q
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same set on every push and PR.
-Don't bypass it.
+CI runs the same set (`ci.yml`) plus a gitleaks secret scan
+(`gitleaks.yml`) on every push and PR. Don't bypass them.
 
 ## Code clarity
 
