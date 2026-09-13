@@ -12,7 +12,7 @@ session. You change no source code.
 ## Inputs the caller gives you
 
 - The URL the stack is running at (e.g. `http://localhost:8080`).
-- A seeded account (e.g. `pauline@42.fr` / the seed password from the
+- A seeded account (e.g. `<seeded-email>` / the seed password from the
   project `CLAUDE.md`).
 - The feature to exercise and the steps that matter.
 
